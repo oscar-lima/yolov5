@@ -35,17 +35,7 @@ import pkg_resources as pkg
 import torch
 import torchvision
 import yaml
-
-# Import 'ultralytics' package or install if if missing
-try:
-    import ultralytics
-
-    assert hasattr(ultralytics, '__version__')  # verify package is not directory
-except (ImportError, AssertionError):
-    os.system('pip install -U ultralytics')
-    import ultralytics
-
-from ultralytics.utils.checks import check_requirements
+from ultralytics.yolo.utils.checks import check_requirements
 
 from utils import TryExcept, emojis
 from utils.downloads import curl_download, gsutil_getsize
@@ -149,12 +139,12 @@ def set_logging(name=LOGGING_NAME, verbose=True):
             name: {
                 'class': 'logging.StreamHandler',
                 'formatter': name,
-                'level': level, }},
+                'level': level,}},
         'loggers': {
             name: {
                 'level': level,
                 'handlers': [name],
-                'propagate': False, }}})
+                'propagate': False,}}})
 
 
 set_logging(LOGGING_NAME)  # run before defining LOGGER
@@ -381,7 +371,7 @@ def check_git_info(path='.'):
         return {'remote': None, 'branch': None, 'commit': None}
 
 
-def check_python(minimum='3.8.0'):
+def check_python(minimum='3.7.0'):
     # Check current python version vs. required python version
     check_version(platform.python_version(), minimum, name='Python ', hard=True)
 
@@ -426,7 +416,7 @@ def check_imshow(warn=False):
         return False
 
 
-def check_suffix(file='yolov5s.pt', suffix=('.pt', ), msg=''):
+def check_suffix(file='yolov5s.pt', suffix=('.pt',), msg=''):
     # Check file(s) for acceptable suffix
     if file and suffix:
         if isinstance(suffix, str):

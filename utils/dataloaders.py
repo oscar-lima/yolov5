@@ -17,6 +17,8 @@ from multiprocessing.pool import Pool, ThreadPool
 from pathlib import Path
 from threading import Thread
 from urllib.parse import urlparse
+import hl2ss
+from socket import timeout, error
 
 import numpy as np
 import psutil
@@ -338,6 +340,91 @@ class LoadImages:
     def __len__(self):
         return self.nf  # number of files
 
+class LoadHololensStream:
+    def __init__(self):
+        self.source = 'hololens'
+        self.mode = 'hololens'
+        self.transforms = None
+        self.vid_stride = 1
+        self.im0 = None
+
+        # HoloLens address
+        #self.host = "192.168.87.21"
+        self.host = "192.168.1.95"
+
+        # Port
+        self.port = hl2ss.StreamPort.PERSONAL_VIDEO
+
+        mode = hl2ss.StreamMode.MODE_0
+
+        width     = 640
+        height    = 360
+        framerate = 15
+
+        profile = hl2ss.VideoProfile.H265_MAIN
+
+        bitrate = hl2ss.get_video_codec_bitrate(width, height, framerate, hl2ss.get_video_codec_default_factor(profile))
+
+        decoded_format = 'bgr24'
+
+        hl2ss.start_subsystem_pv(self.host, self.port)
+
+        self.client = hl2ss.rx_decoded_pv(self.host, self.port, hl2ss.ChunkSize.PERSONAL_VIDEO, mode, width, height, framerate, profile, bitrate, decoded_format)
+        self.client.open()
+
+        data = self.client.get_next_packet()
+        self.im0 = data.payload.image
+
+        cv2.imshow('Video', self.im0)
+        cv2.waitKey(1)
+
+
+        self.enable=True
+        self.thread = Thread(target=self.update, daemon=True)
+        self.thread.start()
+        print("thread started")
+
+    def update(self):
+        n=0
+        while(self.enable):
+            n += 1
+            data = self.client.get_next_packet()
+            # if n % self.vid_stride == 0:
+            self.im0 = data.payload.image
+            cv2.imshow('Video', data.payload.image)
+            cv2.waitKey(1)
+
+            time.sleep(0.0)  # wait time
+
+    def __iter__(self):
+        self.count = -1
+        return self
+
+
+
+    def __next__(self):
+        self.count += 1
+        if cv2.waitKey(1) == ord('q'):  # q to quit
+            #self.enable = False
+            cv2.destroyAllWindows()
+            raise StopIteration
+
+        if self.transforms:
+            im = self.transforms(self.im0)  # transforms
+        else:
+            im = letterbox(self.im0, 640, stride=32, auto=True)[0]  # padded resize
+            im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
+            im = np.ascontiguousarray(im)  # contiguous
+
+
+        return self.source, im, self.im0, None, ''
+
+    def __len__(self):
+        return len(self.sources)  # 1E12 frames = 32 streams at 30 FPS for 30 years
+
+    def __del__(self):
+        self.client.close()
+        hl2ss.stop_subsystem_pv(self.host, self.port)
 
 class LoadStreams:
     # YOLOv5 streamloader, i.e. `python detect.py --source 'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP streams`
