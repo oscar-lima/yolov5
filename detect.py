@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # YOLOv5 🚀 by Ultralytics, AGPL-3.0 license
 """
 Run YOLOv5 detection inference on images, videos, directories, globs, YouTube, webcam, streams, etc.
@@ -49,6 +51,22 @@ from utils.general import (LOGGER, Profile, check_file, check_img_size, check_im
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, smart_inference_mode
 
+# ROS
+import rospy
+import cv2
+from std_msgs.msg import Int8MultiArray
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
+
+rospy.init_node('kl_detection_node', anonymous=True)
+pub = rospy.Publisher('detections', Int8MultiArray, queue_size=1)
+image_pub = rospy.Publisher('camera/image', Image, queue_size=1)
+
+def pub_frame(frame):
+    bridge = CvBridge()
+    # Convert the OpenCV frame to a ROS Image message
+    ros_image = bridge.cv2_to_imgmsg(frame, "bgr8")
+    image_pub.publish(ros_image)
 
 @smart_inference_mode()
 def run(
@@ -103,7 +121,7 @@ def run(
     # Dataloader
     bs = 1  # batch_size
     if webcam:
-        view_img = check_imshow(warn=True)
+        # view_img = check_imshow(warn=True) # this line hangs the system for some reason, we publish the result img to ROS instead
         dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
         bs = len(dataset)
     elif hololens:
@@ -119,6 +137,10 @@ def run(
     model.warmup(imgsz=(1 if pt or model.triton else bs, 3, *imgsz))  # warmup
     seen, windows, dt = 0, [], (Profile(), Profile(), Profile())
     for path, im, im0s, vid_cap, s in dataset:
+        objs_list = []
+        if rospy.is_shutdown():
+            # kill node
+            return
         with dt[0]:
             im = torch.from_numpy(im).to(model.device)
             im = im.half() if model.fp16 else im.float()  # uint8 to fp16/32
@@ -178,8 +200,14 @@ def run(
                     if save_crop:
                         save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
 
+                    objs_list.append(int(cls))
+
             # Stream results
             im0 = annotator.result()
+
+            # publish result img to ros
+            pub_frame(im0)
+
             if view_img:
                 if platform.system() == 'Linux' and p not in windows:
                     windows.append(p)
@@ -209,6 +237,12 @@ def run(
 
         # Print time (inference-only)
         LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{dt[1].dt * 1E3:.1f}ms")
+        if len(det) > 0:
+            data = Int8MultiArray(data=objs_list)
+            pub.publish(data)
+        else:
+            data = Int8MultiArray(data=[])
+            pub.publish(data)
 
     # Print results
     t = tuple(x.t / seen * 1E3 for x in dt)  # speeds per image
@@ -249,7 +283,7 @@ def parse_opt():
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
     parser.add_argument('--vid-stride', type=int, default=1, help='video frame-rate stride')
-    opt = parser.parse_args()
+    opt, unknown = parser.parse_known_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
     print_args(vars(opt))
     return opt
